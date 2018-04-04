@@ -17,7 +17,8 @@ In order to run the code the input data files containing the training and test d
 
 # How to cite it? #
 If you like it and want to cite it in your papers, you can use the following:
-@article{JMLR:v17:15-215,
+```
+@article{Goncalves2016,
   author  = {Andr{{\'e}} R. Gon\c{c}alves and Fernando J. Von Zuben and Arindam Banerjee},
   title   = {Multi-task Sparse Structure Learning with Gaussian Copula Models},
   journal = {Journal of Machine Learning Research},
@@ -26,6 +27,7 @@ If you like it and want to cite it in your papers, you can use the following:
   number  = {33},
   pages   = {1-30}
 }
+```
 
 # Have a question? #
 If you found any bug or have a question, don't hesitate to contact me at: andre -at- cs -dot- umn -dot- edu
