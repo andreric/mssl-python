@@ -36,11 +36,11 @@ res_mssl = list()
 for k in range(5):
     
      # selecting data for training
-    ids = np.random.choice(np.arange(nsamples), size=40, replace=False)
+    ids = np.arange(40) #np.random.choice(np.arange(nsamples), size=40, replace=False)
     rid = np.setdiff1d(np.arange(nsamples), ids)
     
     nid = np.random.choice(np.arange(len(rid)), size=60, replace=False)
-    
+    ntasks = 3
     xtrain = [None]*ntasks
     ytrain = [None]*ntasks
     xtest = [None]*ntasks
@@ -49,9 +49,9 @@ for k in range(5):
     # splitting data in training and test
     for i in range(ntasks):
         
-        xtrain[i] = x[i][ids,0:3]
-        ytrain[i] = y[i][ids]
-        
+        xtrain[i] = x[i][ids[0:5],0:3]
+        ytrain[i] = y[i][ids[0:5]]
+
         # normalization (indicated when data is not gaussian)
         # xtrain{i} = zscore(xtrain{i})
         # [ytrain{i},mu{i},sigma{i}] = zscore( ytrain{i} ) # preprocessing data - Standartization: x ~ N(0,1)

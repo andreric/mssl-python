@@ -27,11 +27,11 @@ def logloss(w, x, y, Omega, P):  #x_vec, y_vec, theta, perm_matrix):
     a = np.maximum(np.minimum(np.dot(x, w), 50), -50)
     f1 = np.multiply(y, a-np.log(1+np.exp(a)))
     f2 = np.multiply(1-y, -np.log(1+np.exp(a)))
-    f = -(f1 + f2).sum()
+    f3 = -(f1 + f2).sum()
 
     r = np.reshape(w, (ndimension, ntasks), order='F')
 #    r = w.reshape(ndimension, ntasks, order='F').copy()
-    f += 0.5*np.trace(np.dot(np.dot(r, Omega), r.T))
+    f = f3 + 0.5*np.trace(np.dot(np.dot(r, Omega), r.T))
 #    print(f)
 
     # gradient of the cost function
@@ -45,6 +45,7 @@ def logloss(w, x, y, Omega, P):  #x_vec, y_vec, theta, perm_matrix):
     g1 = np.dot(np.dot(np.dot(P, matm), P.T), w)
     g = g0[:, 0] + g1
 
+    print('')
     return f, g
 
 
@@ -105,20 +106,21 @@ class MSSLClassifier():
         self.dimension = x[0].shape[1]
 
         # create permutation matrix
-        P = self.create_permutation_matrix(self.dimension, self.ntasks)
+#        P = self.create_permutation_matrix(self.dimension, self.ntasks)
 
         # create (sparse) matrices x and y that are the concatenation
         # of data from all tasks. So, in this way we convert multiple
         # tasks problem to a single (bigger) problem used in the
         # closed-form solution. For gradient-based algorithms like Fista,
         # L-BFGS and others, this is not needed (although can also be used)
-        xmat, ymat = self.create_sparse_AC(x, y)
+#        xmat, ymat = self.create_sparse_AC(x, y)
 
         # initialize learning parameters
         # np.linalg.solve(xmat, ymat)  #  regression warm start
-        Wvec = -0.05 + 0.1*np.random.rand(self.ntasks*self.dimension, 1)
+        Wvec = 1 + 0*np.random.rand(self.ntasks*self.dimension, 1)
         Omega = np.eye(self.ntasks)
 
+        logloss(Wvec, x, Omega)
         # Limited memory BFGS
 #        if self.alg_w == 'lbfgs':,
 #            opt_fminunc = struct('factr', 1e4, 'pgtol', 1e-5, 'm', 10,'maxIts',10,'printEvery',1e6);
