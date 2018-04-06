@@ -49,14 +49,14 @@ for k in range(5):
     # splitting data in training and test
     for i in range(ntasks):
         
-        xtrain[i] = x[i][ids,:]
+        xtrain[i] = x[i][ids,0:3]
         ytrain[i] = y[i][ids]
         
         # normalization (indicated when data is not gaussian)
         # xtrain{i} = zscore(xtrain{i})
         # [ytrain{i},mu{i},sigma{i}] = zscore( ytrain{i} ) # preprocessing data - Standartization: x ~ N(0,1)
 
-        xtest[i] = x[i][rid[nid], :]
+        xtest[i] = x[i][rid[nid], 0:3]
         ytest[i] = y[i][rid[nid]]
 
 

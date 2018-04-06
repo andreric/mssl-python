@@ -5,9 +5,9 @@ Created on Wed Apr  4 16:27:34 2018
 
 @author: goncalves1
 """
-import sys
-import os
-import pickle
+#import sys
+#import os
+#import pickle
 import numpy as np
 import scipy.special
 import scipy.optimize
@@ -24,19 +24,20 @@ def logloss(w, x, y, Omega, P):  #x_vec, y_vec, theta, perm_matrix):
     ndimension = int(len(w)/ntasks)
 
     # cost function
-    a = np.dot(x, w)
-    a = np.maximum(np.minimum(a, 50), -50)
-    f = -(y*(a-np.log(1+np.exp(a))) + (1-y)*(-np.log(1+np.exp(a)))).sum()
+    a = np.maximum(np.minimum(np.dot(x, w), 50), -50)
+    f1 = np.multiply(y, a-np.log(1+np.exp(a)))
+    f2 = np.multiply(1-y, -np.log(1+np.exp(a)))
+    f = -(f1 + f2).sum()
 
     r = np.reshape(w, (ndimension, ntasks), order='F')
 #    r = w.reshape(ndimension, ntasks, order='F').copy()
     f += 0.5*np.trace(np.dot(np.dot(r, Omega), r.T))
-    print(f)
+#    print(f)
 
     # gradient of the cost function
     # logistic regression term
 #    sig_s = scipy.special.expit(np.dot(x,w))[:, np.newaxis]
-    sig_s = sigmoid(np.dot(x,w))[:, np.newaxis]
+    sig_s = sigmoid(np.dot(x, w))[:, np.newaxis]
     g0 = np.dot(x.T, (sig_s-y))
     matm = np.kron(Omega, np.eye(ndimension))
 
@@ -45,6 +46,7 @@ def logloss(w, x, y, Omega, P):  #x_vec, y_vec, theta, perm_matrix):
     g = g0[:, 0] + g1
 
     return f, g
+
 
 def sigmoid(a):
     # Logit function for logistic regression
@@ -57,6 +59,11 @@ def sigmoid(a):
     f = np.exp(a) / (1+np.exp(a))
     return f
 
+
+def shrinkage(a, kappa):
+    return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
+
+
 class MSSLClassifier():
     """
     Implement the MSSL classifier.
@@ -65,7 +72,7 @@ class MSSLClassifier():
         rho_L21 (float): l2,1 penalization hyper-parameter
         rho_L2 (float): l2 penalization hyper-parameter
     """
-    def __init__(self, rho_1=0.1, rho_2=0):
+    def __init__(self, lambda_1=0.1, lambda_2=0):
         """ Initialize object with the informed hyper-parameter values.
         Args:
         rho_L21 (float): l2,1 penalization hyper-parameter
@@ -74,8 +81,8 @@ class MSSLClassifier():
         # set method's name and paradigm
 #        super().__init__('MSSLClassifier', 'MTL')
 
-        self.rho_1 = rho_1
-        self.rho_2 = rho_2
+        self.lambda_1 = lambda_1
+        self.lambda_2 = lambda_2
         self.max_iters = 100
         self.tol = 1e-5  # minimum tolerance: eps * 100
 
@@ -93,27 +100,23 @@ class MSSLClassifier():
 
     def fit(self, x, y):
 
-        print('\n[MSSL]')
-
         # get number of tasks
         self.ntasks = len(x)
         self.dimension = x[0].shape[1]
 
         # create permutation matrix
-        P = self.__create_permutation_matrix(self.dimension, self.ntasks)
-#        P = self.__create_permutation_matrix(2, 3)
-
+        P = self.create_permutation_matrix(self.dimension, self.ntasks)
 
         # create (sparse) matrices x and y that are the concatenation
         # of data from all tasks. So, in this way we convert multiple
         # tasks problem to a single (bigger) problem used in the
         # closed-form solution. For gradient-based algorithms like Fista,
         # L-BFGS and others, this is not needed (although can also be used)
-        xmat, ymat = self.__create_sparse_AC(x, y)
+        xmat, ymat = self.create_sparse_AC(x, y)
 
-        # Learning parameters
-        Wvec = np.random.rand(self.ntasks*self.dimension, 1) #np.linalg.solve(xmat, ymat)  #  warm start
-#        print(Wvec.shape)
+        # initialize learning parameters
+        # np.linalg.solve(xmat, ymat)  #  regression warm start
+        Wvec = -0.05 + 0.1*np.random.rand(self.ntasks*self.dimension, 1)
         Omega = np.eye(self.ntasks)
 
         # Limited memory BFGS
@@ -122,8 +125,8 @@ class MSSLClassifier():
 #            if ntasks*dimension > 10000:
 #                opt_fminunc.m  = 50
 
-        opts = {'maxiter': 1000, 'disp':True}
-
+        # scipy opt parameters
+        opts = {'maxiter': 10, 'disp':True}
         for it in range(self.max_iters):
             print('%d ' % it)
 
@@ -133,7 +136,7 @@ class MSSLClassifier():
             additional = (xmat, ymat, Omega, P)
             res = scipy.optimize.minimize(logloss, x0=Wvec,
                                           args=additional,
-                                          jac=True, method='BFGS',
+                                          jac=False, method='BFGS',
                                           options=opts)
 #            print(res.status)
             Wvec = res.x.copy()
@@ -144,7 +147,8 @@ class MSSLClassifier():
             Omega_old = Omega
 #
 #            # Learn relationship between tasks (inverse covariance matrix)
-##            Omega = __covsel_admm(np.cov(Wmat), self.rho2, self.rho)
+            Omega = self.__omega_step(np.cov(Wmat, rowvar=False),
+                                      self.lambda_2, self.admm_rho)
 #
 #            # checking convergence of Omega and W
             diff_Omega = np.linalg.norm(Omega-Omega_old)
@@ -164,8 +168,8 @@ class MSSLClassifier():
             yhat[t] =  np.round(yhat[t]).astype(np.int32)
         return yhat
 
-    def __create_permutation_matrix(self, k, v):
-        I = np.eye(k*v)
+    def create_permutation_matrix(self, k, v):
+        Imat = np.eye(k*v)
         permV = np.zeros((k*v+1, 1),dtype=int)
         cur = 1
         for i in range(1,v+1):
@@ -173,14 +177,14 @@ class MSSLClassifier():
                 permV[cur,0] = i+((j-1)*v)
                 cur = cur+1
         permV = permV[1:]-1
-        p = I[:, permV].T
+        p = Imat[:, permV].T
         return np.squeeze(p)
     
-    def __create_sparse_AC(self, A, b):
+    def create_sparse_AC(self, A, b):
         nmodels = A[0].shape[1]
         ntasks = len(A)
-        Acap = np.zeros((nmodels*ntasks,1))
-        C = np.zeros((nmodels*ntasks,1))
+        Acap = np.zeros((nmodels*ntasks, 1))
+        C = np.zeros((nmodels*ntasks, 1))
 
         beginId = 0
         endId = nmodels
@@ -194,101 +198,75 @@ class MSSLClassifier():
             beginId = endId
             endId = endId+nmodels
         return Acap, C
-        
 
+    def __omega_step(self, S, lambda_reg, rho):
+        '''
+            ADMM for estimation of the precision matrix of a Gauss-Markov Random Field.
+            
+             Input:
+                 S: sample covariance matrix
+                lambda_reg: regularization parameter (l1-norm)
+                rho: dual regularization parameter (default value = 1)
+            Output:
+                omega: estimated precision matrix
+        '''
 
+        # global constants and defaults
+        max_iters = 10
+        abstol = 1e-5
+        reltol = 1e-5
+        alpha = 1.4
 
+        # get the number of dimensions
+        ntasks = S.shape[0]
 
+        # initiate primal and dual variables
+        Z = np.zeros((ntasks, ntasks))
+        U = np.zeros((ntasks, ntasks))
 
+        print('[Iters]   Primal Res.  Dual Res.')
+        print('------------------------------------')
 
-def __covsel_admm():
-    pass
+        for k in range(0, max_iters):
 
-#function [Z,f] = covsel_admm( S, lambda, rho )
-# covsel  Sparse inverse covariance selection via ADMM
-#
-# [X, history] = covsel(D, lambda, rho, alpha)
-#
-# Solves the following problem via ADMM:
-#
-#   minimize  trace(S*X) - log det X + lambda*||X||_1
-#
-# with variable X, where S is the empirical covariance of the data
-# matrix D (training observations by features).
-#
-# The solution is returned in the matrix X.
-#
-# history is a structure that contains the objective value, the primal and
-# dual residual norms, and the tolerances for the primal and dual residual
-# norms at each iteration.
-#
-# rho is the augmented Lagrangian parameter.
-#
-# alpha is the over-relaxation parameter (typical values for alpha are
-# between 1.0 and 1.8).
-#
-# More information can be found in the paper linked at:
-# http://www.stanford.edu/~boyd/papers/distr_opt_stat_learning_admm.html
-#
+            # x-update
+            # numpy returns eigc_val,eig_vec as opposed to matlab's eig
+            eig_val, eig_vec = np.linalg.eigh(rho*(Z-U)-S)
 
-#    #Global constants and defaults
-#
-#    MAX_ITER = 500;
-#    ABSTOL   = 1e-5;
-#    RELTOL   = 1e-5;
-#    ALFA     = 1.4;
-#    #Data preprocessing
-#
-#    n = size(S,1);
-#    #ADMM solver
-#
-#    #X = zeros(n);
-#    Z = zeros(n);
-#    U = zeros(n);
-#
-#    #if ~QUIET
-#    #    fprintf('#3s\t#10s\t#10s\t%10s\t%10s\t%10s\n', 'iter', ...
-#    #      'r norm', 'eps pri', 's norm', 'eps dual', 'objective');
-#    #end
-#
-#    #dimension = size(D,1);
-#
-#    for k = 1:MAX_ITER
-#
-#        # x-update
-#        #[Q,L] = eig(rho*(Z - U) - (S/2));
-#        [Q,L] = eig(rho*(Z - U) - S);
-#        es = diag(L);
-#        #xi = (es + sqrt(es.^2 + 2*rho*dimension))./(2*rho);
-#        xi = (es + sqrt(es.^2 + 4*rho))./(2*rho);
-#        X = Q*diag(xi)*Q';
-#
-#        # z-update with relaxation
-#        Zold = Z;
-#        X_hat = ALFA*X + (1 - ALFA)*Zold;
-#        Z = shrinkage(X_hat + U, lambda/rho);
-#
-#        U = U + (X_hat - Z);
-#
-#        # diagnostics, reporting, termination checks
-#
-#        #objval(k)  = objective_function(S, X, Z, dimension, lambda);
-#
-#        r_norm  = norm(X - Z, 'fro');
-#        s_norm  = norm(-rho*(Z - Zold),'fro');
-#
-#        eps_pri = sqrt(n*n)*ABSTOL + RELTOL*max(norm(X,'fro'), norm(Z,'fro'));
-#        eps_dual= sqrt(n*n)*ABSTOL + RELTOL*norm(rho*U,'fro');
-#
-#        if (r_norm < eps_pri) and (s_norm < eps_dual):
-#             break
-#
-#        f = objective_function( S, X, lambda )
+            # check eigenvalues
+            if isinstance(eig_val[0], complex):
+                print("Warning: eigenvalues are complex. Check covariance matrix.")
+
+            # eig_val is already an array (no need to get diag)
+            xi = (eig_val + np.sqrt(eig_val**2 + 4*rho)) / (2*rho)
+            X = np.dot(np.dot(eig_vec, np.diag(xi, 0)), eig_vec.T)
+
+            # z-update with relaxation
+            Zold = Z.copy()
+            X_hat = alpha*X + (1-alpha)*Zold
+            Z = shrinkage(X_hat+U, lambda_reg/rho)
+
+            # dual variable update
+            U = U + (X_hat-Z)
+
+            # diagnostics, reporting, termination checks
+            r_norm = np.linalg.norm(X-Z, 'fro')
+            s_norm = np.linalg.norm(-rho*(Z-Zold), 'fro')
+
+            eps_pri = np.sqrt(ntasks**2)*abstol + reltol*max(np.linalg.norm(X,'fro'), np.linalg.norm(Z,'fro'))
+            eps_dual = np.sqrt(ntasks**2)*abstol + reltol*np.linalg.norm(rho*U,'fro')
+
+            # keep track of the residuals (primal and dual)
+            print('   [%d]    %f     %f ' % (k, r_norm, s_norm))
+            if r_norm < eps_pri and s_norm < eps_dual:
+                break
+
+        return Z
+
 #
 #
 #    def __objective_function(S, X, rho):
 #        obj = 0.5*trace(S*X) - log(det(X)) + rho*norm(X(:), 1)
 #        return obj
 #
-#    def __shrinkage(a, kappa):
-#        return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
+
