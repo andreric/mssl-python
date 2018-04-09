@@ -15,39 +15,81 @@ import scipy.optimize
 #sys.path.append('..')
 #from design import Method
 
+#def logloss(w, x, y, Omega, lambda_reg):
+#
+#    ntasks = Omega.shape[1]
+#    ndimensions = int(len(w)/ntasks)
+#    wmat = np.reshape(w, (ndimensions, ntasks), order='F')
+#
+#    for t in range(ntasks):
+#        if len(y[t].shape) > 1:
+#            y[t] = np.squeeze(y[t])
+#
+#    # cost function
+#    cost = 0
+#    grad = np.zeros(wmat.shape)
+#    for t in range(ntasks):
+#        h_t_x = sigmoid(np.dot(x[t], wmat[:, t]))
+##       h_t_x = scipy.special.expit(np.dot(x[t], wmat[:, t]))
+#        f1 = np.multiply(y[t], np.log(h_t_x))
+#        f2 = np.multiply(1-y[t], np.log(1-h_t_x))
+#        cost += -(f1 + f2).mean()
+#        
+#        grad[:, t] = np.dot(x[t].T, (h_t_x-y[t]))/x[t].shape[0]
+#
+#    # cost function regularization
+#    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
+#    # grad regularization
+#    grad += lambda_reg * np.dot(wmat, Omega)
+#    grad = np.reshape(grad, (ndimensions*ntasks, ), order='F')
+#    return cost, grad
 
-def logloss(w, x, y, Omega, P):  #x_vec, y_vec, theta, perm_matrix):
-#    print(type(args))
-#    x, y, Omega, P = args['x'], args['y'], args['Omega'], args['P']
+def logloss(w, x, y, Omega, lambda_reg):
+    ''' MSSL with logloss function '''
+    ntasks = Omega.shape[1]
+    ndimension = int(len(w)/ntasks)
+    wmat = np.reshape(w, (ndimension, ntasks), order='F')
+
+    # make sure the data is in the correct format
+    for t in range(ntasks):
+        if len(y[t].shape) > 1:
+            y[t] = np.squeeze(y[t])
+
+    # cost function for each task
+    cost = 0
+    for t in range(ntasks):
+        h_t_x = sigmoid(np.dot(x[t], wmat[:, t]))
+#       h_t_x = scipy.special.expit(np.dot(x[t], wmat[:, t]))
+        f1 = np.multiply(y[t], np.log(h_t_x))
+        f2 = np.multiply(1-y[t], np.log(1-h_t_x))
+        cost += -(f1 + f2).mean()
+
+    # gradient of regularization term
+    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
+    return cost
+
+def logloss_der(w, x, y, Omega, lambda_reg):
+    ''' Gradient of the MSSL with logloss function '''
 
     ntasks = Omega.shape[1]
     ndimension = int(len(w)/ntasks)
+    wmat = np.reshape(w, (ndimension, ntasks), order='F')
 
-    # cost function
-    a = np.maximum(np.minimum(np.dot(x, w), 50), -50)
-    f1 = np.multiply(y, a-np.log(1+np.exp(a)))
-    f2 = np.multiply(1-y, -np.log(1+np.exp(a)))
-    f3 = -(f1 + f2).sum()
+    # make sure data is in correct format
+    for t in range(ntasks):
+        if len(y[t].shape) > 1:
+            y[t] = np.squeeze(y[t])
 
-    r = np.reshape(w, (ndimension, ntasks), order='F')
-#    r = w.reshape(ndimension, ntasks, order='F').copy()
-    f = f3 + 0.5*np.trace(np.dot(np.dot(r, Omega), r.T))
-#    print(f)
-
-    # gradient of the cost function
-    # logistic regression term
-#    sig_s = scipy.special.expit(np.dot(x,w))[:, np.newaxis]
-    sig_s = sigmoid(np.dot(x, w))[:, np.newaxis]
-    g0 = np.dot(x.T, (sig_s-y))
-    matm = np.kron(Omega, np.eye(ndimension))
-
-    # regularization term
-    g1 = np.dot(np.dot(np.dot(P, matm), P.T), w)
-    g = g0[:, 0] + g1
-
-    print('')
-    return f, g
-
+    # gradient of logloss term
+    grad = np.zeros(wmat.shape)
+    for t in range(ntasks):
+#        sig_s = scipy.special.expit(np.dot(x[t], wmat[:, t])) #[:, np.newaxis]
+        sig_s = sigmoid(np.dot(x[t], wmat[:, t]))
+        grad[:, t] = np.dot(x[t].T, (sig_s-y[t]))/x[t].shape[0]
+    # gradient of regularization term
+    grad += lambda_reg * np.dot(wmat, Omega)
+    grad = np.reshape(grad, (ndimension*ntasks, ), order='F')
+    return grad
 
 def sigmoid(a):
     # Logit function for logistic regression
@@ -82,135 +124,136 @@ class MSSLClassifier():
         # set method's name and paradigm
 #        super().__init__('MSSLClassifier', 'MTL')
 
-        self.lambda_1 = lambda_1
-        self.lambda_2 = lambda_2
+        self.lambda_1 = lambda_1  # trace term
+        self.lambda_2 = lambda_2  # omega sparsity
         self.max_iters = 100
         self.tol = 1e-5  # minimum tolerance: eps * 100
 
+        self.normalize_data = False
         self.admm_rho = 1  # ADMM parameter
-        self.eps_theta = 1e-3   # stopping criteria parameters
-        self.eps_w = 1e-3    # stopping criteria parameters
+        self.eps_theta = 1e-3  # stopping criteria parameters
+        self.eps_w = 1e-3  # stopping criteria parameters
 
         self.ntasks = -1
-        self.dimension = -1
+        self.ndimensions = -1
         self.W = None
         self.Omega = None
         self.output_directory = ''
-#        self.__create_permutation_matrix = __create_permutation_matrix
-#        self.__create_sparse_AC = __create_sparse_AC
 
-    def fit(self, x, y):
+    def fit(self, x, y, intercept=True):
 
-        # get number of tasks
-        self.ntasks = len(x)
-        self.dimension = x[0].shape[1]
+        self.ntasks = len(x)  # get number of tasks
+        self.ndimensions = x[0].shape[1]  # dimension of the data
+        if intercept:
+            self.ndimensions += 1  # if consider intercept, add another feat +1
+        self.intercept = intercept
 
-        # create permutation matrix
-#        P = self.create_permutation_matrix(self.dimension, self.ntasks)
+        x, y, offsets = self.__preprocess_data(x, y)
+        self.offsets = offsets
 
-        # create (sparse) matrices x and y that are the concatenation
-        # of data from all tasks. So, in this way we convert multiple
-        # tasks problem to a single (bigger) problem used in the
-        # closed-form solution. For gradient-based algorithms like Fista,
-        # L-BFGS and others, this is not needed (although can also be used)
-#        xmat, ymat = self.create_sparse_AC(x, y)
-
-        # initialize learning parameters
-        # np.linalg.solve(xmat, ymat)  #  regression warm start
-        Wvec = 1 + 0*np.random.rand(self.ntasks*self.dimension, 1)
-        Omega = np.eye(self.ntasks)
-
-        logloss(Wvec, x, Omega)
-        # Limited memory BFGS
-#        if self.alg_w == 'lbfgs':,
-#            opt_fminunc = struct('factr', 1e4, 'pgtol', 1e-5, 'm', 10,'maxIts',10,'printEvery',1e6);
-#            if ntasks*dimension > 10000:
-#                opt_fminunc.m  = 50
-
-        # scipy opt parameters
-        opts = {'maxiter': 10, 'disp':True}
-        for it in range(self.max_iters):
-            print('%d ' % it)
-
-            # Minimization step
-            W_old = Wvec.copy()
-
-            additional = (xmat, ymat, Omega, P)
-            res = scipy.optimize.minimize(logloss, x0=Wvec,
-                                          args=additional,
-                                          jac=False, method='BFGS',
-                                          options=opts)
-#            print(res.status)
-            Wvec = res.x.copy()
-
-#            # put it in matrix format, where columns are coeff for each task
-            Wmat = np.reshape(Wvec, (self.dimension, self.ntasks), order='F')
-            # Omega step:
-            Omega_old = Omega
-#
-#            # Learn relationship between tasks (inverse covariance matrix)
-            Omega = self.__omega_step(np.cov(Wmat, rowvar=False),
-                                      self.lambda_2, self.admm_rho)
-#
-#            # checking convergence of Omega and W
-            diff_Omega = np.linalg.norm(Omega-Omega_old)
-            diff_W = np.linalg.norm(Wvec-W_old)
-#
-#            # if difference between two consecutive iterations are very small,
-#            # stop training
-            if (diff_Omega < self.eps_theta) and (diff_W < self.eps_w):
-                break
-        self.W = Wmat.copy()
+        W, Omega = self.__mssl_train(x, y)
+        self.W = W.copy()
         self.Omega = Omega.copy()
 
     def predict(self, x):
+        for t in range(self.ntasks):
+#            x[t] = x[t].as_matrix().astype(np.float64)
+            x[t] = (x[t]-self.offsets['x_offset'][t])
+            if self.normalize_data:
+                x[t] = x[t]/self.offsets['x_scale'][t]
+            if self.intercept:
+                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
+
         yhat = [None]*len(x)
         for t in range(len(x)):
             yhat[t] = scipy.special.expit(np.dot( x[t], self.W[:, t]))
-            yhat[t] =  np.round(yhat[t]).astype(np.int32)
+            yhat[t] =  np.around(yhat[t]).astype(np.int32)
         return yhat
 
-    def create_permutation_matrix(self, k, v):
-        Imat = np.eye(k*v)
-        permV = np.zeros((k*v+1, 1),dtype=int)
-        cur = 1
-        for i in range(1,v+1):
-            for j in range(1,k+1):
-                permV[cur,0] = i+((j-1)*v)
-                cur = cur+1
-        permV = permV[1:]-1
-        p = Imat[:, permV].T
-        return np.squeeze(p)
-    
-    def create_sparse_AC(self, A, b):
-        nmodels = A[0].shape[1]
-        ntasks = len(A)
-        Acap = np.zeros((nmodels*ntasks, 1))
-        C = np.zeros((nmodels*ntasks, 1))
+    def __preprocess_data(self, x, y):
 
-        beginId = 0
-        endId = nmodels
-        for task in range(ntasks):
-            splI = np.zeros((ntasks, ntasks))
-            splI[task][task] = 1 #set this node to 1 so it gets picked up
-            #do kronecker product and add to Acap
-            newA = np.dot(A[task].T, A[task])
-            Acap = Acap + np.kron(splI, newA)
-            C[beginId:endId] = np.dot(A[task].T, b[task])
-            beginId = endId
-            endId = endId+nmodels
-        return Acap, C
+        # make sure y is in correct shape
+        for t in range(self.ntasks):
+#            x[t] = x[t].as_matrix().astype(np.float64)
+            y[t] = y[t].ravel() #as_matrix().astype(np.float64).ravel()
+            if len(y[t].shape) < 2:
+                y[t] = y[t][:, np.newaxis]
+
+        offsets = {'x_offset': list(),
+                   'x_scale': list()}
+        for t in range(self.ntasks):
+            offsets['x_offset'].append(x[t].mean(axis=0))
+            if self.normalize_data:
+                std = x[t].std(axis=0)
+                std[std == 0] = 1
+                offsets['x_scale'].append(std)
+            else:
+                std = np.ones((x[t].shape[1],))
+                offsets['x_scale'].append(std)
+            x[t] = (x[t] - offsets['x_offset'][t]) / offsets['x_scale'][t]
+            if self.intercept:
+                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
+        return x, y, offsets
+
+    def __mssl_train(self, x, y):
+
+        # initialize learning parameters
+        # np.linalg.solve(xmat, ymat)  #  regression warm start
+        W = -0.05 + 0.05*np.random.rand(self.ndimensions, self.ntasks)
+        Omega = np.eye(self.ntasks)
+
+        # scipy opt parameters
+        opts = {'maxiter': 5, 'disp':False}
+        for it in range(self.max_iters):
+#            print('%d ' % it)
+
+            # Minimization step
+            W_old = W.copy()
+            Wvec = np.reshape(W, (self.ndimensions*self.ntasks, ), order='F')
+
+            r = scipy.optimize.check_grad(logloss,
+                                          logloss_der,
+                                          Wvec, x, y, Omega, self.lambda_1)
+            print(r)
+
+            additional = (x, y, Omega, self.lambda_1)
+            res = scipy.optimize.minimize(logloss, x0=Wvec,
+                                          args=additional,
+                                          jac=logloss_der,
+                                          method='BFGS',
+                                          options=opts)
+
+            # put it in matrix format, where columns are coeff for each task
+            W = np.reshape(res.x.copy(), (self.ndimensions, self.ntasks), order='F')
+            # Omega step:
+            Omega_old = Omega
+
+            # Learn relationship between tasks (inverse covariance matrix)
+            Omega = self.__omega_step(np.cov(W, rowvar=False),
+                                      self.lambda_2, self.admm_rho)
+
+            # checking convergence of Omega and W
+            diff_Omega = np.linalg.norm(Omega-Omega_old)
+            diff_W = np.linalg.norm(W-W_old)
+
+            # if difference between two consecutive iterations are very small,
+            # stop training
+            if (diff_Omega < self.eps_theta) and (diff_W < self.eps_w):
+                break
+
+        return W, Omega
+
 
     def __omega_step(self, S, lambda_reg, rho):
         '''
-            ADMM for estimation of the precision matrix of a Gauss-Markov Random Field.
-            
-             Input:
-                 S: sample covariance matrix
-                lambda_reg: regularization parameter (l1-norm)
-                rho: dual regularization parameter (default value = 1)
-            Output:
-                omega: estimated precision matrix
+        ADMM for estimation of the precision matrix.
+
+        Input:
+           S: sample covariance matrix
+           lambda_reg: regularization parameter (l1-norm)
+           rho: dual regularization parameter (default value = 1)
+        Output:
+           omega: estimated precision matrix
         '''
 
         # global constants and defaults
@@ -226,8 +269,8 @@ class MSSLClassifier():
         Z = np.zeros((ntasks, ntasks))
         U = np.zeros((ntasks, ntasks))
 
-        print('[Iters]   Primal Res.  Dual Res.')
-        print('------------------------------------')
+#        print('[Iters]   Primal Res.  Dual Res.')
+#        print('------------------------------------')
 
         for k in range(0, max_iters):
 
@@ -237,7 +280,7 @@ class MSSLClassifier():
 
             # check eigenvalues
             if isinstance(eig_val[0], complex):
-                print("Warning: eigenvalues are complex. Check covariance matrix.")
+                print("Warning: complex eigenvalues. Check covariance matrix.")
 
             # eig_val is already an array (no need to get diag)
             xi = (eig_val + np.sqrt(eig_val**2 + 4*rho)) / (2*rho)
@@ -259,16 +302,8 @@ class MSSLClassifier():
             eps_dual = np.sqrt(ntasks**2)*abstol + reltol*np.linalg.norm(rho*U,'fro')
 
             # keep track of the residuals (primal and dual)
-            print('   [%d]    %f     %f ' % (k, r_norm, s_norm))
+#            print('   [%d]    %f     %f ' % (k, r_norm, s_norm))
             if r_norm < eps_pri and s_norm < eps_dual:
                 break
 
         return Z
-
-#
-#
-#    def __objective_function(S, X, rho):
-#        obj = 0.5*trace(S*X) - log(det(X)) + rho*norm(X(:), 1)
-#        return obj
-#
-

@@ -11,11 +11,86 @@ import scipy.special
 import scipy.optimize
 import scipy.sparse
 import scipy.linalg
-sys.path.append('..')
-from design import Method
+#sys.path.append('..')
+#from design import Method
+
+#def squaredloss(w, x, y, Omega, lambda_reg):
+#
+#    ntasks = Omega.shape[1]
+#    ndimension = int(len(w)/ntasks)
+#    wmat = np.reshape(w, (ndimension, ntasks), order='F')
+#
+#    for t in range(ntasks):
+#        if len(y[t].shape) > 1:
+#            y[t] = np.squeeze(y[t])
+#
+#    # cost function and gradient for all tasks
+#    cost = 0
+#    grad = np.zeros(wmat.shape)
+#    for t in range(ntasks):
+#        # cost function
+#        h_t_x = np.dot(x[t], wmat[:, t])
+#        cost += ((h_t_x - y[t])**2).mean()
+#        
+#        # gradient
+#        g1 = np.dot(np.dot(x[t].T, x[t]), wmat[:, t])
+#        g2 = np.dot(x[t].T, y[t])
+#        grad[:, t] = (2.0/x[t].shape[0])*(g1-g2)
+#
+#    # cost function regularization
+#    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
+#
+#    # gradient regularization term
+#    grad += lambda_reg * np.dot(wmat, Omega)
+#    grad = np.reshape(grad, (ndimension*ntasks, ), order='F')
+#
+#    return cost, grad
 
 
-class MSSLRegressor(Method):
+def squaredloss(w, x, y, Omega, lambda_reg):
+    '''MSSL with squared loss function '''
+    ntasks = Omega.shape[1]
+    ndimension = int(len(w)/ntasks)
+    wmat = np.reshape(w, (ndimension, ntasks), order='F')
+
+    # make sure data is in the correct format
+#    for t in range(ntasks):
+#        if len(y[t].shape) > 1:
+#            y[t] = np.squeeze(y[t])
+
+    # cost function for each task
+    cost = 0
+    for t in range(ntasks):
+        h_t_x = np.dot(x[t], wmat[:, t])
+        cost += ((h_t_x - y[t])**2).mean()
+    # cost function regularization
+    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
+    return cost
+
+def squaredloss_der(w, x, y, Omega, lambda_reg):
+    ''' Gradient of the MSSL with squared loss function '''
+
+    ntasks = Omega.shape[1]
+    ndimension = int(len(w)/ntasks)
+    wmat = np.reshape(w, (ndimension, ntasks), order='F')
+
+    # make sure data is in correct format
+#    for t in range(ntasks):
+#        if len(y[t].shape) > 1:
+#            y[t] = np.squeeze(y[t])
+
+    # gradient of squared loss term
+    grad = np.zeros(wmat.shape)
+    for t in range(ntasks):
+        g1 = np.dot(np.dot(x[t].T, x[t]), wmat[:, t])
+        g2 = np.dot(x[t].T, y[t])
+        grad[:, t] = (2.0/x[t].shape[0])*(g1-g2)
+    # gradient of regularization term
+    grad += lambda_reg * np.dot(wmat, Omega)
+    grad = np.reshape(grad, (ndimension*ntasks, ), order='F')
+    return grad
+
+class MSSLRegressor():
     """
     Implement the MSSL classifier.
 
@@ -30,32 +105,35 @@ class MSSLRegressor(Method):
             lambda_2 (float): W l1-penalization hyper-parameter
         """
         # set method's name and paradigm
-        super().__init__('MSSLRegressor', 'MTL')
+#        super().__init__('MSSLRegressor', 'MTL')
 
-        self.wstep_alg = 'closed-form'
+        self.wstep_alg = 'gradient-based'
+#        self.wstep_alg = 'closed-form'
 
-        self.lambda_1 = lambda_1  # omega sparsity
-        self.lambda_2 = lambda_2  # w sparsity
+        self.lambda_1 = lambda_1  # trace term
+        self.lambda_2 = lambda_2  # omega sparsity
         self.max_iters = 100
         self.tol = 1e-5  # minimum tolerance: eps * 100
 
         self.sparse = False
-        self.normalize_data = True
+        self.normalize_data = False
         self.admm_rho = 1  # ADMM parameter
         self.eps_theta = 1e-3  # stopping criteria parameters
         self.eps_w = 1e-3  # stopping criteria parameters
 
         self.ntasks = -1
-        self.dimension = -1
+        self.ndimensions = -1
         self.W = None
         self.Omega = None
         self.output_directory = ''
 
-    def fit(self, x, y):
+    def fit(self, x, y, intercept=True):
 
-        # get number of tasks
-        self.ntasks = len(x)
-        self.dimension = x[0].shape[1]
+        self.ntasks = len(x)  # get number of tasks
+        self.ndimensions = x[0].shape[1]  # dimension of the data
+        if intercept:
+            self.ndimensions += 1  # if consider intercept, add another feat +1
+        self.intercept = intercept
 
         x, y, offsets = self.__preprocess_data(x, y)
         self.offsets = offsets
@@ -66,10 +144,12 @@ class MSSLRegressor(Method):
 
     def predict(self, x):
         for t in range(self.ntasks):
-            x[t] = x[t].as_matrix().astype(np.float64)
+#            x[t] = x[t].as_matrix().astype(np.float64)
             x[t] = (x[t]-self.offsets['x_offset'][t])
             if self.normalize_data:
                 x[t] = x[t]/self.offsets['x_scale'][t]
+            if self.intercept:
+                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
 
         yhat = [None]*len(x)
         for t in range(len(x)):
@@ -81,10 +161,10 @@ class MSSLRegressor(Method):
 
         # make sure y is in correct shape
         for t in range(self.ntasks):
-            x[t] = x[t].as_matrix().astype(np.float64)
-            y[t] = y[t].as_matrix().astype(np.float64).ravel()
-            if len(y[t].shape) < 2:
-                y[t] = y[t][:, np.newaxis]
+#            x[t] = x[t].as_matrix().astype(np.float64)
+            y[t] = y[t].ravel() #as_matrix().astype(np.float64).ravel()
+            if len(y[t].shape) == 2:
+                y[t] = np.squeeze(y[t]) #[:, np.newaxis]
 
         offsets = {'x_offset': list(),
                    'x_scale': list(),
@@ -99,37 +179,46 @@ class MSSLRegressor(Method):
                 std = np.ones((x[t].shape[1],))
                 offsets['x_scale'].append(std)
             x[t] = (x[t] - offsets['x_offset'][t]) / offsets['x_scale'][t]
-
+            if self.intercept:
+                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
             offsets['y_offset'].append(y[t].mean(axis=0))
             y[t] = y[t] - offsets['y_offset'][t]
         return x, y, offsets
 
     def __mssl_train(self, x, y):
 
-        # create permutation matrix
-        P = self.create_permutation_matrix(self.dimension, self.ntasks)
+        if self.wstep_alg == 'closed-form':
+            # create permutation matrix
+            P = self.create_permutation_matrix(self.ndimensions, self.ntasks)
 
-        # create (sparse) matrices x and y that are the concatenation
-        # of data from all tasks. So, in this way we convert multiple
-        # tasks problem to a single (bigger) problem used in the
-        # closed-form solution. For gradient-based algorithms like Fista,
-        # L-BFGS and others, this is not needed (although can also be used)
-        xmat, ymat = self.create_sparse_AC(x, y)
+            # create (sparse) matrices x and y that are the concatenation
+            # of data from all tasks. So, in this way we convert multiple
+            # tasks problem to a single (bigger) problem used in the
+            # closed-form solution. For gradient-based algorithms like Fista,
+            # L-BFGS and others, this is not needed (although can also be used)
+            xmat, ymat = self.create_sparse_AC(x, y)
 
         # initialize learning parameters
 #        Wvec =  scipy.linalg.lstsq(xmat, ymat)   #  regression warm start
-        Wvec = -0.05 + 0.05*np.random.rand(self.ntasks*self.dimension, 1)
+        W = -0.05 + 0.05*np.random.rand(self.ndimensions, self.ntasks)
         Omega = np.eye(self.ntasks)
 
         # scipy opt parameters
         for it in range(self.max_iters):
 
             # Minimization step
-            W_old = Wvec.copy()
+            W_old = W.copy()
+            Wvec = np.reshape(W, (self.ndimensions*self.ntasks, ), order='F')
 
             if self.wstep_alg == 'closed-form':
-                factor = self.lambda_2
-                L = np.kron(np.eye(self.dimension), Omega)
+                factor = self.lambda_1
+                # TODO: weighted version
+                #https://stackoverflow.com/questions/27128688/how-to-use-least-squares-with-weight-matrix-in-python
+                #W = [1,2,3,4,5]
+                #W = np.sqrt(np.diag(W))
+                #Aw = np.dot(W,A)
+                #Bw = np.dot(B,W)
+                L = np.kron(np.eye(self.ndimensions), Omega)
                 Xls = xmat + np.dot(np.dot(factor * P, L), P.T)
 #                if Xls.shape[0] == Xls.shape[1]:  # squared Xls
 #                    Wvec = np.linalg.solve(Xls, ymat)
@@ -137,35 +226,42 @@ class MSSLRegressor(Method):
                 Wvec, _, _, _ = scipy.linalg.lstsq(Xls, ymat)
 
             elif self.wstep_alg == 'gradient-based':
-                opts = {'maxiter': 10, 'disp': True}
-                additional = (xmat, ymat, Omega, P)
-                res = scipy.optimize.minimize(squared_loss, x0=Wvec,
+                opts = {'maxiter': 10, 'disp': False}
+                r = scipy.optimize.check_grad(squaredloss,
+                                          squaredloss_der,
+                                          Wvec, x, y, Omega, self.lambda_1)
+                print(r)
+                additional = (x, y, Omega, self.lambda_1)
+                res = scipy.optimize.minimize(squaredloss, x0=Wvec,
                                               args=additional,
-                                              jac=True, method='BFGS',
-                                              options=opts)
+                                              jac=squaredloss_der,
+                                              method='BFGS', options=opts)
                 Wvec = res.x.copy()
             else:
                 raise NotImplementedError("W-step %s not found" %
                                           self.wstep_alg)
 
             # put it in matrix format, where columns are coeff for each task
-            Wmat = np.reshape(Wvec, (self.dimension, self.ntasks), order='F')
+            W = np.reshape(Wvec, (self.ndimensions, self.ntasks), order='F')
+
             # Omega step:
             Omega_old = Omega
 
             # Learn relationship between tasks (inverse covariance matrix)
-            Omega = self.__omega_step(np.cov(Wmat, rowvar=False),
-                                      self.lambda_1, self.admm_rho)
+            Omega = self.__omega_step(np.cov(W, rowvar=False),
+                                      self.lambda_2, self.admm_rho)
 
             # checking convergence of Omega and W
             diff_Omega = np.linalg.norm(Omega-Omega_old, 'fro')
-            diff_W = np.linalg.norm(Wvec-W_old)
+            diff_W = np.linalg.norm(W-W_old)
 
             # if difference between two consecutive iterations are very small,
             # stop training
             if (diff_Omega < self.eps_theta) and (diff_W < self.eps_w):
                 break
-        return Wmat, Omega
+        return W, Omega
+#        self.W = W.copy()
+#        self.Omega = Omega.copy()
 
     def set_params(self, params):
         """
@@ -306,24 +402,6 @@ class MSSLRegressor(Method):
                 break
 
         return Z
-
-
-def squared_loss(w, x, y, Omega, P):
-
-    ntasks = Omega.shape[1]
-    ndimension = int(len(w)/ntasks)
-
-    lambda_reg = 1
-
-    wmat = np.reshape(w, (ndimension, ntasks), order='F')
-    # cost function
-    f = 0.5*np.dot(np.dot(w.T, x), w) - np.dot(w.T, y)
-    f += (0.5*lambda_reg)*np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
-
-    # gradient
-    km = np.kron(Omega, np.eye(ndimension))
-    g = np.dot(x.T + np.dot(np.dot(lambda_reg*P, km), P.T), w) - y
-    return f, g
 
 
 def shrinkage(a, kappa):

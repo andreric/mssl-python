@@ -20,7 +20,7 @@ if __name__ == '__main__':
 
     nsamples = x[0].shape[0]
 
-    lambda_1 = 0.28  # sparsity on the Omega matrix (tasks' relationship)
+    lambda_1 = 1  # sparsity on the Omega matrix (tasks' relationship)
     lambda_2 = 0.5  # sparsity on tasks' parameter matrix W (only for FISTA)
 
     nruns = 5
@@ -57,7 +57,7 @@ if __name__ == '__main__':
             # [ytrain{i},mu{i},sigma{i}] = zscore( ytrain{i} ) # preprocessing data - Standartization: x ~ N(0,1)
 
             xtest[i] = x[i][rid[nid], :]
-            ytest[i] = y[i][rid[nid], 0]
+            ytest[i] = y[i][rid[nid]]
 
 #            xtest[i] = x[i][rid, :]
 #            ytest[i] = y[i][rid, 0]
