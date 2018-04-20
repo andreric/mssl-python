@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Created on Mon Apr  9 08:46:32 2018
+
+@author: goncalves1
+"""
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
 Created on Wed Apr  4 16:54:33 2018
 
 @author: goncalves1
@@ -11,40 +19,8 @@ import scipy.special
 import scipy.optimize
 import scipy.sparse
 import scipy.linalg
-#sys.path.append('..')
-#from design import Method
-
-#def squaredloss(w, x, y, Omega, lambda_reg):
-#
-#    ntasks = Omega.shape[1]
-#    ndimension = int(len(w)/ntasks)
-#    wmat = np.reshape(w, (ndimension, ntasks), order='F')
-#
-#    for t in range(ntasks):
-#        if len(y[t].shape) > 1:
-#            y[t] = np.squeeze(y[t])
-#
-#    # cost function and gradient for all tasks
-#    cost = 0
-#    grad = np.zeros(wmat.shape)
-#    for t in range(ntasks):
-#        # cost function
-#        h_t_x = np.dot(x[t], wmat[:, t])
-#        cost += ((h_t_x - y[t])**2).mean()
-#        
-#        # gradient
-#        g1 = np.dot(np.dot(x[t].T, x[t]), wmat[:, t])
-#        g2 = np.dot(x[t].T, y[t])
-#        grad[:, t] = (2.0/x[t].shape[0])*(g1-g2)
-#
-#    # cost function regularization
-#    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
-#
-#    # gradient regularization term
-#    grad += lambda_reg * np.dot(wmat, Omega)
-#    grad = np.reshape(grad, (ndimension*ntasks, ), order='F')
-#
-#    return cost, grad
+sys.path.append('..')
+from design import Method
 
 
 def squaredloss(w, x, y, Omega, lambda_reg):
@@ -92,7 +68,7 @@ def squaredloss_der(w, x, y, Omega, lambda_reg):
     return grad
 
 
-class MSSLRegressor():
+class MSSLRegressor(Method):
     """
     Implement the MSSL classifier.
 
@@ -107,7 +83,7 @@ class MSSLRegressor():
             lambda_2 (float): W l1-penalization hyper-parameter
         """
         # set method's name and paradigm
-#        super().__init__('MSSLRegressor', 'MTL')
+        super().__init__('MSSLRegressor', 'MTL')
 
         self.wstep_alg = 'gradient-based'
 #        self.wstep_alg = 'closed-form'
@@ -118,7 +94,7 @@ class MSSLRegressor():
         self.tol = 1e-5  # minimum tolerance: eps * 100
 
         self.sparse = False
-        self.normalize_data = False
+        self.normalize_data = True
         self.admm_rho = 1  # ADMM parameter
         self.eps_theta = 1e-3  # stopping criteria parameters
         self.eps_w = 1e-3  # stopping criteria parameters
@@ -146,7 +122,7 @@ class MSSLRegressor():
 
     def predict(self, x):
         for t in range(self.ntasks):
-#            x[t] = x[t].as_matrix().astype(np.float64)
+            x[t] = x[t].as_matrix().astype(np.float64)
             x[t] = (x[t]-self.offsets['x_offset'][t])
             if self.normalize_data:
                 x[t] = x[t]/self.offsets['x_scale'][t]
@@ -163,10 +139,10 @@ class MSSLRegressor():
 
         # make sure y is in correct shape
         for t in range(self.ntasks):
-#            x[t] = x[t].as_matrix().astype(np.float64)
-            y[t] = y[t].ravel() #as_matrix().astype(np.float64).ravel()
+            x[t] = x[t].as_matrix().astype(np.float64)
+            y[t] = y[t].as_matrix().astype(np.float64).ravel()
             if len(y[t].shape) == 2:
-                y[t] = np.squeeze(y[t]) #[:, np.newaxis]
+                y[t] = np.squeeze(y[t])  # [:, np.newaxis]
 
         offsets = {'x_offset': list(),
                    'x_scale': list(),
@@ -288,7 +264,6 @@ class MSSLRegressor():
         lambda_1 = np.logspace(-7, 2, 10)
         lambda_2 = np.logspace(0, 4, 10)
         for r0 in lambda_1:
-#            yield {'lambda_1': r0, 'lambda_2': 0}
             for r1 in lambda_2:
                 yield {'lambda_1': r0,
                        'lambda_2': r1}
@@ -402,32 +377,41 @@ class MSSLRegressor():
 #            print('   [%d]    %f     %f ' % (k, r_norm, s_norm))
             if r_norm < eps_pri and s_norm < eps_dual:
                 break
-
         return Z
 
 
 def shrinkage(a, kappa):
     return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
 
-#if strcmp(prob_type,'regression'),
-#            
-#            switch( opts_ao.alg_w ),
-#                
-#                case 'fminunc',
-#                    Wvec = fminunc( @(w)cost_function_squared_loss(w, x, y, Omega, P), Wvec, opt );
-#                
-#                case 'fista', 
-#                    
-#                    [Wvec,~] = acc_proximal_gradient( Wvec, x, y, Omega, P, opts_ao.gamma, 10 );
+#def squaredloss(w, x, y, Omega, lambda_reg):
 #
-#                case 'lbfgs',
-#                    opts.x0 = Wvec;
-#                    [Wvec, ~, info] = lbfgsb(@(w)cost_function_squared_loss(w, x, y, Omega, P), ...
-#                                          -inf(ntasks*dimension,1), inf(ntasks*dimension,1), opts );
-#                
-#                otherwise
-#                    error('Optimization algorithm for W-step is not valid!');
-#                    
-#                
-#            end
-#            
+#    ntasks = Omega.shape[1]
+#    ndimension = int(len(w)/ntasks)
+#    wmat = np.reshape(w, (ndimension, ntasks), order='F')
+#
+#    for t in range(ntasks):
+#        if len(y[t].shape) > 1:
+#            y[t] = np.squeeze(y[t])
+#
+#    # cost function and gradient for all tasks
+#    cost = 0
+#    grad = np.zeros(wmat.shape)
+#    for t in range(ntasks):
+#        # cost function
+#        h_t_x = np.dot(x[t], wmat[:, t])
+#        cost += ((h_t_x - y[t])**2).mean()
+#        
+#        # gradient
+#        g1 = np.dot(np.dot(x[t].T, x[t]), wmat[:, t])
+#        g2 = np.dot(x[t].T, y[t])
+#        grad[:, t] = (2.0/x[t].shape[0])*(g1-g2)
+#
+#    # cost function regularization
+#    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
+#
+#    # gradient regularization term
+#    grad += lambda_reg * np.dot(wmat, Omega)
+#    grad = np.reshape(grad, (ndimension*ntasks, ), order='F')
+#
+#    return cost, grad
+
