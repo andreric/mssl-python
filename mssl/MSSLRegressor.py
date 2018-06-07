@@ -5,14 +5,13 @@ Created on Mon May 21 15:41:50 2018
 
 @author: goncalves1
 """
-import sys
 import os
 import pickle
 import numpy as np
 import scipy.special
 import scipy.optimize
 
-from MSSL import MSSL
+from .MSSL import MSSL
 
 #def squaredloss(w, x, y, Omega, lambda_reg):
 #    '''MSSL with squared loss function '''
@@ -109,10 +108,6 @@ def weighted_squaredloss_der(w, x, y, Omega, lambda_reg, weights):
     return grad
 
 
-def shrinkage(a, kappa):
-    return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
-
-
 class MSSLRegressor(MSSL):
     """
     Implement the MSSL Regressor.
@@ -122,18 +117,23 @@ class MSSLRegressor(MSSL):
         """ Initialize object with the informed hyper-parameter values. """
         super().__init__(lambda_1, lambda_2, fit_intercept, normalize_data)
 
-    def fit(self, x, y, intercept=True, **kwargs):
+    @MSSL._check_inputs  # decorator to chek inputs
+    def fit(self, x, y, sample_weight=None):
 
         self.ntasks = len(x)  # get number of tasks
         self.ndimensions = x[0].shape[1]  # dimension of the data
-        if intercept:
+        if self.fit_intercept:
             self.ndimensions += 1  # if consider intercept, add another feat +1
-        self.intercept = intercept
 
         x, y, offsets = self.__preprocess_data(x, y)
         self.offsets = offsets
 
-        W, Omega = self.__mssl_train(x, y)
+        if sample_weight is None:
+            sample_weight = np.ones(x.shape[0])
+
+        W, Omega = self.__train(x, y, sample_weight,
+                                weighted_squaredloss,
+                                weighted_squaredloss_der)
         self.W = W.copy()
         self.Omega = Omega.copy()
         fname = os.path.join(self.output_directory, '%s.mdl' % self.__str__())
@@ -155,23 +155,6 @@ class MSSLRegressor(MSSL):
             yhat[t] = np.maximum(0, yhat[t])
         return yhat
 
-    def __preprocess_data(self, x, y, d, v):
-        # make sure y is in correct shape
-        offsets = {'x_offset': list(),
-                   'x_scale': list()}
-        for t in range(self.ntasks):
-            offsets['x_offset'].append(x[t].mean(axis=0))
-            if self.normalize_data:
-                std = x[t].std(axis=0)
-                std[std == 0] = 1
-                offsets['x_scale'].append(std)
-            else:
-                std = np.ones((x[t].shape[1],))
-                offsets['x_scale'].append(std)
-            x[t] = (x[t] - offsets['x_offset'][t]) / offsets['x_scale'][t]
-            if self.intercept:
-                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
-        return x, y, d, v, offsets
 
 #    def __mssl_train(self, x, y, weights):
 #

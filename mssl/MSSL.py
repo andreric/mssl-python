@@ -6,6 +6,7 @@ Created on Wed Jun  6 16:43:00 2018
 @author: goncalves1
 """
 import numpy as np
+import scipy
 
 
 class MSSL(object):
@@ -18,10 +19,12 @@ class MSSL(object):
         self.max_iters = 100
         self.tol = 1e-4  # minimum tolerance: eps * 100
 
-        self.normalize_data = True
         self.admm_rho = 1  # ADMM parameter
         self.eps_theta = 1e-3  # stopping criteria parameters
         self.eps_w = 1e-3  # stopping criteria parameters
+
+        self.fit_intercept = fit_intercept
+        self.normalize_data = normalize_data
 
         self.ntasks = -1
         self.ndimensions = -1
@@ -29,7 +32,14 @@ class MSSL(object):
         self.Omega = None
         self.output_directory = ''
 
-    def __mssl_train(self, x, y, weights):
+    def _check_inputs(func):
+        def func_wrapper(self):
+               return "<p>{0}</p>".format(func(self))
+           return func_wrapper
+        
+    def __train(self, x, y, weights,
+                weighted_costfunction,
+                weighted_costfunction_der):
 
         # initialize learning parameters
         # np.linalg.solve(xmat, ymat)  #  regression warm start
@@ -52,14 +62,14 @@ class MSSL(object):
 #            print(r)
 
             additional = (x, y, Omega, self.lambda_1, weights)
-            res = scipy.optimize.minimize(weighted_logloss, x0=Wvec,
+            res = scipy.optimize.minimize(weighted_costfunction, x0=Wvec,
                                           args=additional,
-                                          jac=weighted_logloss_der,
+                                          jac=weighted_costfunction_der,
                                           method='BFGS',
                                           options=opts)
 
             # put it in matrix format, where columns are coeff for each task
-            W = np.reshape(res.x.copy(), 
+            W = np.reshape(res.x.copy(),
                            (self.ndimensions, self.ntasks), order='F')
             # Omega step:
             Omega_old = Omega
@@ -78,7 +88,6 @@ class MSSL(object):
                 break
 
         return W, Omega
-
 
     def __omega_step(self, S, lambda_reg, rho):
         '''
@@ -113,6 +122,8 @@ class MSSL(object):
 
 #        print('[Iters]   Primal Res.  Dual Res.')
 #        print('------------------------------------')
+        def shrinkage(a, kappa):
+            return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
 
         for k in range(0, max_iters):
 
@@ -191,6 +202,23 @@ class MSSL(object):
         self.logger.set_path(output_dir)
         self.logger.setup_logger(self.__str__())
 
+    def preprocess_data(self, x, y):
+        # make sure y is in correct shape
+        offsets = {'x_offset': list(),
+                   'x_scale': list()}
+        for t in range(self.ntasks):
+            offsets['x_offset'].append(x[t].mean(axis=0))
+            if self.normalize_data:
+                std = x[t].std(axis=0)
+                std[std == 0] = 1
+                offsets['x_scale'].append(std)
+            else:
+                std = np.ones((x[t].shape[1],))
+                offsets['x_scale'].append(std)
+            x[t] = (x[t] - offsets['x_offset'][t]) / offsets['x_scale'][t]
+            if self.fit_intercept:
+                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
+        return x, y, offsets
 
 #def logloss(w, x, y, Omega, lambda_reg):
 #

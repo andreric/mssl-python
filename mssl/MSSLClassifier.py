@@ -11,9 +11,10 @@ import pickle
 import numpy as np
 import scipy.special
 import scipy.optimize
-from MSSL import MSSL
+from .MSSL import MSSL
 
 sys.path.append('..')
+
 
 def weighted_logloss(w, x, y, Omega, lambda_reg, weights):
     ''' MSSL with logloss function '''
@@ -91,17 +92,24 @@ class MSSLClassifier(MSSL):
         """ Initialize object with the informed hyper-parameter values. """
         super().__init__(lambda_1, lambda_2, fit_intercept, normalize_data)
 
-    def fit(self, x, y, sample_weights=None):
+    @MSSL._check_inputs  # decorator to chek inputs
+    def fit(self, x, y, sample_weight=None):
 
         self.ntasks = len(x)  # get number of tasks
         self.ndimensions = x[0].shape[1]  # dimension of the data
         if self.fit_intercept:
             self.ndimensions += 1  # if consider intercept, add another feat +1
 
-        x, y, offsets = self.__preprocess_data(x, y, d, v)
+        x, y, offsets = self.preprocess_data(x, y)
         self.offsets = offsets
 
-        W, Omega = self.__mssl_train(x, y, w)
+        if sample_weight is None:
+            sample_weight = np.ones(x.shape[0])
+
+        W, Omega = self.__train(x, y, sample_weight,
+                                weighted_logloss,
+                                weighted_logloss_der)
+
         self.W = W.copy()
         self.Omega = Omega.copy()
         fname = os.path.join(self.output_directory, '%s.mdl' % self.__str__())
@@ -114,7 +122,7 @@ class MSSLClassifier(MSSL):
             x[t] = (x[t]-self.offsets['x_offset'][t])
             if self.normalize_data:
                 x[t] = x[t]/self.offsets['x_scale'][t]
-            if self.intercept:
+            if self.fit_intercept:
                 x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
 
         yhat = [None]*len(x)
@@ -122,22 +130,3 @@ class MSSLClassifier(MSSL):
             yhat[t] = scipy.special.expit(np.dot(x[t], self.W[:, t]))
             yhat[t] = yhat[t] #np.around().astype(np.int32)
         return yhat
-
-    def __preprocess_data(self, x, y):
-        # make sure y is in correct shape
-        offsets = {'x_offset': list(),
-                   'x_scale': list()}
-        for t in range(self.ntasks):
-            offsets['x_offset'].append(x[t].mean(axis=0))
-            if self.normalize_data:
-                std = x[t].std(axis=0)
-                std[std == 0] = 1
-                offsets['x_scale'].append(std)
-            else:
-                std = np.ones((x[t].shape[1],))
-                offsets['x_scale'].append(std)
-            x[t] = (x[t] - offsets['x_offset'][t]) / offsets['x_scale'][t]
-            if self.intercept:
-                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
-        return x, y, offsets
-
