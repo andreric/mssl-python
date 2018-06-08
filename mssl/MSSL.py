@@ -6,7 +6,7 @@ Created on Wed Jun  6 16:43:00 2018
 @author: goncalves1
 """
 import numpy as np
-import scipy
+import scipy.optimize
 
 
 class MSSL(object):
@@ -20,8 +20,8 @@ class MSSL(object):
         self.tol = 1e-4  # minimum tolerance: eps * 100
 
         self.admm_rho = 1  # ADMM parameter
-        self.eps_theta = 1e-3  # stopping criteria parameters
-        self.eps_w = 1e-3  # stopping criteria parameters
+        self.eps_theta = 1e-4  # stopping criteria parameters
+        self.eps_w = 1e-4  # stopping criteria parameters
 
         self.fit_intercept = fit_intercept
         self.normalize_data = normalize_data
@@ -31,13 +31,19 @@ class MSSL(object):
         self.W = None
         self.Omega = None
         self.output_directory = ''
-
-    def _check_inputs(func):
-        def func_wrapper(self):
-               return "<p>{0}</p>".format(func(self))
-           return func_wrapper
+    
+    def _check_inputs(self, x, y, w):
+        """ Check if x, y, and w have matching dimensions""" 
+        assert len(x) == len(y)
+        if w is not None:
+            assert len(x) == len(w)
+        for k in range(len(x)):
+            assert x[k].shape[0] == y[k].shape[0]
+            if w is not None:
+                assert y[k].shape[0] == w[k].shape[0]
+            
         
-    def __train(self, x, y, weights,
+    def _train(self, x, y, weights,
                 weighted_costfunction,
                 weighted_costfunction_der):
 
@@ -75,7 +81,7 @@ class MSSL(object):
             Omega_old = Omega
 
             # Learn relationship between tasks (inverse covariance matrix)
-            Omega = self.__omega_step(np.cov(W, rowvar=False),
+            Omega = self._omega_step(np.cov(W, rowvar=False),
                                       self.lambda_2, self.admm_rho)
 
             # checking convergence of Omega and W
@@ -89,7 +95,7 @@ class MSSL(object):
 
         return W, Omega
 
-    def __omega_step(self, S, lambda_reg, rho):
+    def _omega_step(self, S, lambda_reg, rho):
         '''
         ADMM for estimation of the precision matrix.
 
@@ -100,8 +106,6 @@ class MSSL(object):
         Output:
            omega: estimated precision matrix
         '''
-#        print('lambda_reg: %f'%lambda_reg)
-#        print('rho: %f'%rho)
         # global constants and defaults
         max_iters = 10
         abstol = 1e-5
@@ -116,14 +120,15 @@ class MSSL(object):
         # get the number of dimensions
         ntasks = S.shape[0]
 
+        def shrinkage(a, kappa):
+            return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
+
         # initiate primal and dual variables
         Z = np.zeros((ntasks, ntasks))
         U = np.zeros((ntasks, ntasks))
 
-#        print('[Iters]   Primal Res.  Dual Res.')
-#        print('------------------------------------')
-        def shrinkage(a, kappa):
-            return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
+        print('[Iters]   Primal Res.  Dual Res.')
+        print('------------------------------------')
 
         for k in range(0, max_iters):
 
@@ -160,49 +165,19 @@ class MSSL(object):
             eps_dual = np.sqrt(ntasks**2)*abstol + reltol*np.linalg.norm(rho*U,'fro')
 
             # keep track of the residuals (primal and dual)
-#            print('   [%d]    %f     %f ' % (k, r_norm, s_norm))
+            print('   [%d]    %f     %f ' % (k, r_norm, s_norm))
             if r_norm < eps_pri and s_norm < eps_dual:
                 break
 
         return Z
 
-    def set_params(self, params):
-        """
-        Set hyper-parameters to be used in the execution.
-        Args:
-            params (dict): dict with hyper-parameter values.
-        """
-        self.lambda_1 = params['lambda_1']
-        self.lambda_2 = params['lambda_2']
+    def _preprocess_data(self, x, y, sample_weight):
 
-    def get_params(self):
-        """ Return hyper-parameters used in the execution.
-        Return:
-            params (dict): dict containing the hyper-params values.
-        """
-        ret = {'lambda_1': self.lambda_1,
-               'lambda_2': self.lambda_2}
-        return ret
-
-    def get_params_grid(self):
-        """ Yield set of hyper-parameters to be tested out."""
-        lambda_1 = np.logspace(-1, 3, 10)
-        lambda_2 = np.logspace(-5, 2, 10)
-        for r0 in lambda_1:
-            for r1 in lambda_2:
-                yield {'lambda_1': r0,
-                       'lambda_2': r1}
-
-    def set_output_directory(self, output_dir):
-        """ Set output folder path.
-        Args:
-            output_dir (str): path to output directory.
-        """
-        self.output_directory = output_dir
-        self.logger.set_path(output_dir)
-        self.logger.setup_logger(self.__str__())
-
-    def preprocess_data(self, x, y):
+        if sample_weight is None:
+            w = list()
+            for xi in x:
+                w.append(np.ones(xi.shape[0]))
+        
         # make sure y is in correct shape
         offsets = {'x_offset': list(),
                    'x_scale': list()}
@@ -218,33 +193,14 @@ class MSSL(object):
             x[t] = (x[t] - offsets['x_offset'][t]) / offsets['x_scale'][t]
             if self.fit_intercept:
                 x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
-        return x, y, offsets
+        return x, y, w, offsets
 
-#def logloss(w, x, y, Omega, lambda_reg):
-#
-#    ntasks = Omega.shape[1]
-#    ndimensions = int(len(w)/ntasks)
-#    wmat = np.reshape(w, (ndimensions, ntasks), order='F')
-#
-#    for t in range(ntasks):
-#        if len(y[t].shape) > 1:
-#            y[t] = np.squeeze(y[t])
-#
-#    # cost function
-#    cost = 0
-#    grad = np.zeros(wmat.shape)
-#    for t in range(ntasks):
-#        h_t_x = sigmoid(np.dot(x[t], wmat[:, t]))
-##       h_t_x = scipy.special.expit(np.dot(x[t], wmat[:, t]))
-#        f1 = np.multiply(y[t], np.log(h_t_x))
-#        f2 = np.multiply(1-y[t], np.log(1-h_t_x))
-#        cost += -(f1 + f2).mean()
-#        
-#        grad[:, t] = np.dot(x[t].T, (h_t_x-y[t]))/x[t].shape[0]
-#
-#    # cost function regularization
-#    cost += (0.5*lambda_reg) * np.trace(np.dot(np.dot(wmat, Omega), wmat.T))
-#    # grad regularization
-#    grad += lambda_reg * np.dot(wmat, Omega)
-#    grad = np.reshape(grad, (ndimensions*ntasks, ), order='F')
-#    return cost, grad
+
+    def set_output_directory(self, output_dir):
+        """ Set output folder path.
+        Args:
+            output_dir (str): path to output directory.
+        """
+        self.output_directory = output_dir
+        self.logger.set_path(output_dir)
+        self.logger.setup_logger(self.__str__())

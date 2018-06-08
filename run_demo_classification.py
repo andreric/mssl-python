@@ -67,9 +67,8 @@ for k in range(5):
     
     yhat = mssl_clf.predict(xtest)
     
-    acc = [None]*ntasks
+    acc = [[] for _ in range(ntasks)]
     for t in range(ntasks):
-#        print(yhat[t])
         acc[t] = (yhat[t] == ytest[t]).sum()/len(ytest[t])
     print(acc)
 

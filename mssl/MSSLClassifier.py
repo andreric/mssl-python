@@ -5,7 +5,6 @@ Created on Fri Apr 13 10:01:39 2018
 
 @author: goncalves1
 """
-import sys
 import os
 import pickle
 import numpy as np
@@ -13,7 +12,50 @@ import scipy.special
 import scipy.optimize
 from .MSSL import MSSL
 
-sys.path.append('..')
+
+class MSSLClassifier(MSSL):
+    """
+    Implement the MSSL classifier.
+    """
+    def __init__(self, lambda_1=0.1, lambda_2=0,
+                 fit_intercept=True, normalize_data=False):
+        """ Initialize object with the informed hyper-parameter values. """
+        super().__init__(lambda_1, lambda_2, fit_intercept, normalize_data)
+
+    def fit(self, x, y, sample_weight=None):
+
+        self._check_inputs(x, y, sample_weight)        
+        self.ntasks = len(x)  # get number of tasks
+        self.ndimensions = x[0].shape[1]  # dimension of the data
+        if self.fit_intercept:
+            self.ndimensions += 1  # if consider intercept, add another feat +1
+
+        x, y, w, self.offsets = self._preprocess_data(x, y, sample_weight)
+
+        W, Omega = self._train(x, y, w,
+                                weighted_logloss,
+                                weighted_logloss_der)
+
+        self.W = W.copy()
+        self.Omega = Omega.copy()
+        fname = os.path.join(self.output_directory, '%s.mdl' % self.__str__())
+        with open(fname, 'wb') as fh:
+            pickle.dump([self.W, self.Omega], fh)
+
+    def predict(self, x, **kwargs):
+        for t in range(self.ntasks):
+            x[t] = x[t].astype(np.float64)
+            x[t] = (x[t]-self.offsets['x_offset'][t])
+            if self.normalize_data:
+                x[t] = x[t]/self.offsets['x_scale'][t]
+            if self.fit_intercept:
+                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
+
+        yhat = [None]*len(x)
+        for t in range(len(x)):
+            yhat[t] = scipy.special.expit(np.dot(x[t], self.W[:, t]))
+            yhat[t] = np.around(yhat[t]).astype(np.int32)
+        return yhat
 
 
 def weighted_logloss(w, x, y, Omega, lambda_reg, weights):
@@ -81,52 +123,3 @@ def sigmoid(a):
 
 def shrinkage(a, kappa):
     return np.maximum(0, a-kappa) - np.maximum(0, -a-kappa)
-
-
-class MSSLClassifier(MSSL):
-    """
-    Implement the MSSL classifier.
-    """
-    def __init__(self, lambda_1=0.1, lambda_2=0,
-                 fit_intercept=True, normalize_data=False):
-        """ Initialize object with the informed hyper-parameter values. """
-        super().__init__(lambda_1, lambda_2, fit_intercept, normalize_data)
-
-    @MSSL._check_inputs  # decorator to chek inputs
-    def fit(self, x, y, sample_weight=None):
-
-        self.ntasks = len(x)  # get number of tasks
-        self.ndimensions = x[0].shape[1]  # dimension of the data
-        if self.fit_intercept:
-            self.ndimensions += 1  # if consider intercept, add another feat +1
-
-        x, y, offsets = self.preprocess_data(x, y)
-        self.offsets = offsets
-
-        if sample_weight is None:
-            sample_weight = np.ones(x.shape[0])
-
-        W, Omega = self.__train(x, y, sample_weight,
-                                weighted_logloss,
-                                weighted_logloss_der)
-
-        self.W = W.copy()
-        self.Omega = Omega.copy()
-        fname = os.path.join(self.output_directory, '%s.mdl' % self.__str__())
-        with open(fname, 'wb') as fh:
-            pickle.dump([self.W, self.Omega], fh)
-
-    def predict(self, x, **kwargs):
-        for t in range(self.ntasks):
-            x[t] = x[t].astype(np.float64)
-            x[t] = (x[t]-self.offsets['x_offset'][t])
-            if self.normalize_data:
-                x[t] = x[t]/self.offsets['x_scale'][t]
-            if self.fit_intercept:
-                x[t] = np.hstack((x[t], np.ones((x[t].shape[0], 1))))
-
-        yhat = [None]*len(x)
-        for t in range(len(x)):
-            yhat[t] = scipy.special.expit(np.dot(x[t], self.W[:, t]))
-            yhat[t] = yhat[t] #np.around().astype(np.int32)
-        return yhat
