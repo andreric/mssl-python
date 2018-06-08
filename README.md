@@ -1,6 +1,6 @@
 # mssl-python
 
-> **Under development as of May 24, 2018** 
+> **Under development as of June 08, 2018** 
 
 
 Multi-task Sparse Structure Learning (MSSL) method in Python
@@ -11,6 +11,12 @@ This repository contains a Python implementation of the MSSL algorithm proposed 
 
 # Overview #
 MSSL belongs to the realm of Multi-task Learning algorithms. Given a set of tasks (regression or classification problems) MSSL learns the parameter set for all tasks in such a way that exploits the structural dependencies among them to improve the performance of individual tasks. Unlike many other multi-task learning methods, MSSL does not assume any type of structure beforehand, but learn it from the data. To learn both task parameters for all tasks and relatedness information MSSL uses an alternating minimization algorithm.
+
+# Dependencies #
+- Python 3.6
+- Scipy
+- Numpy
+
 
 # How to run it? #
 A file called *run_demo.py* was created to show how to run MSSL code. In this example tasks are synthetic regression problems. From this script one can change it as needed to deal with classification problems.
